@@ -143,13 +143,13 @@ class PortalEngine {
       ctx.restore();
     });
 
-    // игрок (топ-даун: используем кадр ходьбы, зеркалим для лево/право)
-    const img = CHAR_SPRITES.nikita;
+    // игрок в порталах — Ксюша (топ-даун: используем кадр ходьбы, зеркалим для лево/право)
+    const img = CHAR_SPRITES.ksyusha;
     if (img.complete && img.naturalWidth) {
+      const { w: fw, h: fh } = frameSize(img);
       const frame = Math.floor(this.player.distance / PORTAL_STEP_LEN) % 8;
       const col = frame % 4, row = Math.floor(frame / 4);
-      const scale = 1.5;
-      const w = SPRITE_FRAME * scale, h = SPRITE_FRAME * scale;
+      const h = 118, w = h * (fw / fh);
       const px = this.player.x * W, py = this.player.y * H;
       const bob = this.player.moving ? Math.sin(this.time * 9) * 2.4 : 0;
       ctx.save();
@@ -158,7 +158,7 @@ class PortalEngine {
       ctx.fillStyle = `rgba(255,255,255,${dustAlpha})`;
       ctx.beginPath(); ctx.ellipse(0, 14, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
       if (this.player.facing === "left") ctx.scale(-1, 1);
-      ctx.drawImage(img, col * SPRITE_FRAME, row * SPRITE_FRAME, SPRITE_FRAME, SPRITE_FRAME, -w / 2, -h / 2, w, h);
+      ctx.drawImage(img, col * fw, row * fh, fw, fh, -w / 2, -h / 2, w, h);
       ctx.restore();
     }
 

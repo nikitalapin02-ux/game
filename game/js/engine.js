@@ -4,9 +4,9 @@
 
 const SPACING = 380;          // расстояние между обычными точками
 const PORTAL_SPACING = 620;   // расстояние вокруг порталов (простор для ворот)
-const GROUND_Y_FRAC = 0.78;   // относительная высота "линии ходьбы" на экране
-const SPRITE_FRAME = 64;      // размер кадра в спрайт-листе 256x256 (4x2)
+const GROUND_Y_FRAC = 0.86;   // относительная высота "линии ходьбы" на экране
 const STEP_LEN = 20;          // "шаг" в мировых px на один кадр анимации (плавность по расстоянию)
+const CHAR_TARGET_H = 92;     // целевой рост персонажа на дороге в px экрана (нормализует разные спрайт-листы)
 
 // запасные цвета неба на случай, если картинка сцены ещё не загружена
 const SEASON_FALLBACK = {
@@ -51,6 +51,12 @@ const CHAR_SPRITES = {
   max: loadImage("assets/characters/max_walk_sheet.png"),
   shemrok: loadImage("assets/characters/shemrok_walk_sheet.png"),
 };
+// каждый спрайт-лист — сетка 4 колонки x 2 ряда (8 кадров ходьбы), но
+// сами кадры могут быть разного размера от листа к листу — считаем
+// размер кадра из фактических размеров картинки, а не жёстко фиксируем
+function frameSize(img) {
+  return { w: img.naturalWidth / 4, h: img.naturalHeight / 2 };
+}
 
 // цельные нарисованные фоны-сцены (см. docs/scenario.md / Weave-генерация):
 // один на каждый портал + 4 сезонных для самой дороги + один для финала
@@ -66,23 +72,35 @@ const FINALE_SCENE = loadImage("assets/scenes/finale.png");
 
 function readyImg(img) { return img && img.complete && img.naturalWidth > 0; }
 
-// рисует картинку сцены на всю высоту канваса, зеркально повторяя по горизонтали
-// (чтобы скрыть шов не идеально бесшовной иллюстрации), со сдвигом камеры parallaxX
+// рисует картинку сцены на всю высоту канваса как единый нескроллящийся (очень
+// медленный параллакс) фон, БЕЗ зеркалирования; если камера всё же выходит за
+// пределы одной картинки, следующая копия мягко проявляется кроссфейдом вместо
+// жёсткого/зеркального шва
 function drawTiledScene(ctx, img, W, H, parallaxX, alpha) {
   if (!readyImg(img)) return;
-  ctx.save();
-  ctx.globalAlpha = alpha;
   const scale = H / img.naturalHeight;
   const tileW = img.naturalWidth * scale;
+  const blend = Math.min(tileW * 0.35, 260);
   const start = -((parallaxX % tileW) + tileW) % tileW;
   let x = start - tileW;
   while (x < W + tileW) {
-    const flip = (Math.round((x - start) / tileW) % 2 + 2) % 2 === 1;
     ctx.save();
-    if (flip) { ctx.translate(x + tileW, 0); ctx.scale(-1, 1); ctx.drawImage(img, 0, 0, tileW, H); }
-    else { ctx.drawImage(img, x, 0, tileW, H); }
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(img, x, 0, tileW, H);
     ctx.restore();
     x += tileW;
+  }
+  // тонкая мягкая дымка поверх швов, чтобы стык не читался жёсткой линией
+  ctx.save();
+  ctx.globalAlpha = alpha * 0.5;
+  const seamX = ((-parallaxX % tileW) + tileW) % tileW;
+  for (let sx = seamX - tileW; sx < W + tileW; sx += tileW) {
+    const grad = ctx.createLinearGradient(sx - blend, 0, sx + blend, 0);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(0.5, "rgba(0,0,0,0.10)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx - blend, 0, blend * 2, H);
   }
   ctx.restore();
 }
@@ -170,19 +188,20 @@ class RoadEngine {
     return { a: seasonOf(prev.month), b: seasonOf(next.month), t };
   }
 
-  drawSprite(img, frameIndexTotal, worldX, groundY, facing, scale, bobPhase) {
+  drawSprite(img, frameIndexTotal, worldX, groundY, facing, heightMul, bobPhase) {
     if (!img.complete || !img.naturalWidth) return;
+    const { w: fw, h: fh } = frameSize(img);
     const frame = frameIndexTotal % 8;
     const col = frame % 4, row = Math.floor(frame / 4);
     const ctx = this.ctx;
-    const sx = col * SPRITE_FRAME, sy = row * SPRITE_FRAME;
-    const drawW = SPRITE_FRAME * scale, drawH = SPRITE_FRAME * scale;
+    const sx = col * fw, sy = row * fh;
+    const drawH = CHAR_TARGET_H * heightMul, drawW = drawH * (fw / fh);
     const screenX = worldX - this.camX;
-    const bob = Math.sin(this.time * 6 + bobPhase) * 1.6;
+    const bob = Math.sin(this.time * 6 + bobPhase) * 1.4;
     ctx.save();
     ctx.translate(screenX, groundY - drawH / 2 + bob);
     if (facing < 0) ctx.scale(-1, 1);
-    ctx.drawImage(img, sx, sy, SPRITE_FRAME, SPRITE_FRAME, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.drawImage(img, sx, sy, fw, fh, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
   }
 
@@ -238,8 +257,8 @@ class RoadEngine {
     const order = [...this.followers].sort((a, b) => a.worldX - b.worldX);
     order.forEach(f => {
       const frameIdx = Math.floor(f.distance / STEP_LEN);
-      const scale = f.sprite === "shemrok" ? 0.55 : f.sprite === "max" ? 0.68 : 1.15;
-      this.drawSprite(CHAR_SPRITES[f.sprite], frameIdx, f.worldX, groundY, f.facing, scale, f.bobPhase);
+      const heightMul = f.sprite === "shemrok" ? 0.32 : f.sprite === "max" ? 0.52 : 0.97;
+      this.drawSprite(CHAR_SPRITES[f.sprite], frameIdx, f.worldX, groundY, f.facing, heightMul, f.bobPhase);
     });
     const pFrame = Math.floor(this.player.distance / STEP_LEN);
     const runTilt = this.player.running ? this.player.facing * 3 : 0;
@@ -250,7 +269,7 @@ class RoadEngine {
       ctx.rotate(runTilt * Math.PI / 180);
       ctx.translate(-sx, -groundY);
     }
-    this.drawSprite(CHAR_SPRITES.nikita, pFrame, this.player.worldX, groundY - this.player.jumpT * 26, this.player.facing, 1.2, 0);
+    this.drawSprite(CHAR_SPRITES.nikita, pFrame, this.player.worldX, groundY - this.player.jumpT * 26, this.player.facing, 1.0, 0);
     ctx.restore();
   }
 
