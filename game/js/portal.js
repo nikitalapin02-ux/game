@@ -52,11 +52,17 @@ class PortalEngine {
     if (down) { dy += speed * 0.7; if (!left && !right) this.player.facing = "down"; }
     this.player.moving = !!(dx || dy);
 
-    // зона ходьбы: широкая полоса вдоль нижней трети сцены (там, где на
-    // сгенерированной картинке нарисована тропа переднего плана)
-    const minX = 0.06, maxX = 0.94, minY = 0.52, maxY = 0.86;
-    this.player.x = Math.max(minX, Math.min(maxX, this.player.x + dx));
-    this.player.y = Math.max(minY, Math.min(maxY, this.player.y + dy));
+    // зона ходьбы: ромб (изометрический пол двора) в центре сцены —
+    // персонаж может свободно ходить по всей мощёной площадке во все стороны
+    const cx = 0.5, cy = 0.62, rx = 0.46, ry = 0.3;
+    let nx = this.player.x + dx, ny = this.player.y + dy;
+    const inside = (x, y) => Math.abs((x - cx) / rx) + Math.abs((y - cy) / ry) <= 1;
+    if (inside(nx, ny)) { this.player.x = nx; this.player.y = ny; }
+    else {
+      // скользим вдоль края ромба, а не жёстко останавливаемся
+      if (inside(nx, this.player.y)) this.player.x = nx;
+      if (inside(this.player.x, ny)) this.player.y = ny;
+    }
 
     if (this.player.moving) {
       this.player.distance += Math.hypot(dx, dy) * this.canvas.width;
