@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Наш Путь</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="startScreen" class="overlay">
+    <div class="start-card glass">
+      <div class="start-title">Наш&nbsp;Путь</div>
+      <div class="start-sub">2017 — 2026 · история длиною в путешествия</div>
+      <button id="startBtn" class="btn-primary">Начать путь</button>
+      <div class="start-hint">← → / A D — идти · Shift — бежать · E — взаимодействовать</div>
+    </div>
+  </div>
+
+  <div id="hud" class="hud glass hidden">
+    <div class="hud-chapter" id="hudChapter">Глава 1 · Искра</div>
+    <div class="hud-progress"><div id="hudProgressBar" class="hud-progress-bar"></div></div>
+    <button id="musicBtn" class="hud-icon-btn" title="Музыка">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 3v10.55A4 4 0 1 0 11 17V7h6V3H9z"/></svg>
+    </button>
+  </div>
+
+  <canvas id="game"></canvas>
+
+  <div id="promptTag" class="prompt-tag hidden">E — нажать</div>
+  <div id="pointCard" class="point-card glass hidden">
+    <div id="pointCardDate" class="point-card-date"></div>
+    <div id="pointCardTitle" class="point-card-title"></div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div id="comicModal" class="overlay hidden">
+    <div class="comic-card glass">
+      <div class="comic-header" id="comicHeader"></div>
+      <div class="comic-stage">
+        <div class="comic-portrait" id="comicPortraitLeft"></div>
+        <div class="comic-bubble" id="comicBubble">
+          <div class="comic-speaker" id="comicSpeaker"></div>
+          <div class="comic-line" id="comicLine"></div>
+        </div>
+        <div class="comic-portrait" id="comicPortraitRight"></div>
+      </div>
+      <div class="comic-footer">
+        <span class="comic-hint">Space / клик — далее · Esc — закрыть</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="portalHud" class="hud glass hidden">
+    <button id="portalExitBtn" class="hud-icon-btn" title="Назад на дорогу">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+    </button>
+    <div class="hud-chapter" id="portalTitle"></div>
+  </div>
+
+  <div id="finaleOverlay" class="overlay hidden">
+    <canvas id="finaleParticles"></canvas>
+    <div class="finale-content">
+      <div class="finale-heart">💛</div>
+      <div class="finale-line" id="finaleLine1">Мы прошли этот путь вместе —</div>
+      <div class="finale-line" id="finaleLine2">от сугроба в Грузии до&nbsp;сегодняшнего дня.</div>
+      <div class="finale-line finale-edit" id="finaleEditableText">
+        <!-- РЕДАКТИРУЕТСЯ ЗДЕСЬ: замени этот текст на свои слова -->
+        Здесь будут твои слова…
+      </div>
+      <div class="finale-question" id="finaleQuestion">Ксюша, выйдешь за меня?</div>
+      <div class="finale-buttons">
+        <button id="finaleYes" class="btn-primary btn-yes">Да!</button>
+        <button id="finaleNo" class="btn-secondary btn-no">Нет</button>
+      </div>
+    </div>
+    <div id="finaleCelebration" class="finale-celebration hidden">
+      <div class="finale-celebration-text">Она сказала «Да» 💍</div>
+    </div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/portal.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
