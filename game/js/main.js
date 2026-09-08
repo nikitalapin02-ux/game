@@ -156,7 +156,13 @@ function maybeShowFinale() {
   if (road.player.worldX >= WORLD_END - 30 && state === "road") {
     state = "finale";
     document.getElementById("hud").classList.add("hidden");
-    document.getElementById("finaleOverlay").classList.remove("hidden");
+    const overlay = document.getElementById("finaleOverlay");
+    if (readyImg(FINALE_SCENE)) {
+      overlay.style.backgroundImage = `linear-gradient(rgba(10,8,18,0.35), rgba(10,8,18,0.75)), url(${FINALE_SCENE.src})`;
+      overlay.style.backgroundSize = "cover";
+      overlay.style.backgroundPosition = "center";
+    }
+    overlay.classList.remove("hidden");
   }
 }
 
