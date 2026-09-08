@@ -1,0 +1,4 @@
+# Intermediate working file: full-res alpha-fixed location sheets.
+# Regenerate with: python3 tools/dechecker_locations.py
+# (source of truth is assets/locations/raw/, final game assets are game/assets/decor/)
+game/assets/locations_alpha/

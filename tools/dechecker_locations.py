@@ -1,56 +1,24 @@
+"""
+Strip the baked-in checkerboard background out of assets/locations/raw/*.png
+and write true-alpha RGBA versions into game/assets/locations_alpha/ (an
+intermediate; tools/slice_decor.py then cuts individual objects out of it).
+
+The AI-generated packs export a checkerboard "transparency" pattern baked
+into RGB pixels instead of a real alpha channel. This finds the two
+checker tones via 2-means clustering on the image's border pixels, then
+removes any border-connected region whose color is close to either tone
+(border-connectivity keeps it from eating real objects that merely share
+a similar tone in their own texture/shading).
+"""
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 import os, unicodedata
 
 RAW_DIR = "/home/user/game/assets/locations/raw"
-OUT_DIR = "/home/user/game/game/assets/locations"
-
-def corner_top_colors(arr, size=56, topn=2):
-    h, w, _ = arr.shape
-    parts = [
-        arr[0:size, 0:size].reshape(-1, 3),
-        arr[0:size, w-size:w].reshape(-1, 3),
-        arr[h-size:h, 0:size].reshape(-1, 3),
-        arr[h-size:h, w-size:w].reshape(-1, 3),
-    ]
-    corners = np.concatenate(parts, axis=0)
-    bucket = (corners // 5 * 5)
-    colors, counts = np.unique(bucket, axis=0, return_counts=True)
-    order = np.argsort(-counts)
-    return [colors[i].astype(np.float32) for i in order[:topn]]
-
-def dechecker(slug, rawname, tol=26):
-    src = os.path.join(RAW_DIR, rawname)
-    dst = os.path.join(OUT_DIR, slug)
-    im = Image.open(src).convert("RGB")
-    arr = np.array(im).astype(np.int16)
-
-    bg_colors = corner_top_colors(arr, topn=3)
-    if len(bg_colors) >= 2:
-        pair_d = max(np.linalg.norm(bg_colors[0]-bg_colors[1]),
-                     np.linalg.norm(bg_colors[0]-bg_colors[2]) if len(bg_colors)>2 else 0)
-        tol = max(tol, pair_d/2 + 14)
-    dist_all = None
-    for c in bg_colors:
-        d = np.linalg.norm(arr.astype(np.float32) - c, axis=2)
-        dist_all = d if dist_all is None else np.minimum(dist_all, d)
-    checker_mask = dist_all < tol
-
-    labeled, n = ndimage.label(checker_mask, structure=np.ones((3,3)))
-    border_labels = set(labeled[0, :]) | set(labeled[-1, :]) | set(labeled[:, 0]) | set(labeled[:, -1])
-    border_labels.discard(0)
-    bg_mask = np.isin(labeled, list(border_labels))
-
-    alpha = np.where(bg_mask, 0, 255).astype(np.uint8)
-    rgba = np.dstack([np.array(im), alpha])
-    Image.fromarray(rgba, mode="RGBA").save(dst)
-    pct = bg_mask.mean() * 100
-    print(f"  {slug}: removed {pct:.1f}%")
-    return pct
-
-raw_files = sorted(os.listdir(RAW_DIR))
-byNorm = {unicodedata.normalize("NFC", f): f for f in raw_files}
+OUT_DIR = "/home/user/game/game/assets/locations_alpha"
+TOL = 42
+CORNER = 56
 
 SLUG_TO_RAW = {
  "altai.png":"Алтай.png","anapa.png":"Анапа.png","astrakhan.png":"Астрахань.png",
@@ -74,12 +42,55 @@ SLUG_TO_RAW = {
  "srilanka.png":"Шри-Ланка.png","korea.png":"ЮжнаяКорея.png",
 }
 
-low = []
-for slug, rawname in SLUG_TO_RAW.items():
-    rn = unicodedata.normalize("NFC", rawname)
-    if rn not in byNorm:
-        print("MISSING RAW:", rawname); continue
-    pct = dechecker(slug, byNorm[rn])
-    if pct < 40:
-        low.append(slug)
-print("\nLOW COVERAGE (<40%):", low)
+
+def kmeans2(points, iters=15, seed=0):
+    rs = np.random.RandomState(seed)
+    idx = rs.choice(len(points), 2, replace=False)
+    c = points[idx].astype(np.float64)
+    for _ in range(iters):
+        d0 = np.linalg.norm(points - c[0], axis=1)
+        d1 = np.linalg.norm(points - c[1], axis=1)
+        assign = d1 < d0
+        if assign.any():
+            c[1] = points[assign].mean(axis=0)
+        if (~assign).any():
+            c[0] = points[~assign].mean(axis=0)
+    return c
+
+
+def dechecker(src, dst, tol=TOL, corner=CORNER):
+    im = Image.open(src).convert("RGB")
+    arr = np.array(im).astype(np.float64)
+    h, w, _ = arr.shape
+    parts = [
+        arr[0:corner, 0:corner].reshape(-1, 3), arr[0:corner, w - corner:w].reshape(-1, 3),
+        arr[h - corner:h, 0:corner].reshape(-1, 3), arr[h - corner:h, w - corner:w].reshape(-1, 3),
+    ]
+    corners = np.concatenate(parts, axis=0)
+    centers = kmeans2(corners)
+    d0 = np.linalg.norm(arr - centers[0], axis=2)
+    d1 = np.linalg.norm(arr - centers[1], axis=2)
+    checker_mask = np.minimum(d0, d1) < tol
+
+    labeled, n = ndimage.label(checker_mask, structure=np.ones((3, 3)))
+    border_labels = set(labeled[0, :]) | set(labeled[-1, :]) | set(labeled[:, 0]) | set(labeled[:, -1])
+    border_labels.discard(0)
+    bg_mask = np.isin(labeled, list(border_labels))
+
+    alpha = np.where(bg_mask, 0, 255).astype(np.uint8)
+    rgba = np.dstack([np.array(im), alpha])
+    Image.fromarray(rgba, "RGBA").save(dst)
+    return bg_mask.mean() * 100
+
+
+if __name__ == "__main__":
+    os.makedirs(OUT_DIR, exist_ok=True)
+    raw_files = sorted(os.listdir(RAW_DIR))
+    by_norm = {unicodedata.normalize("NFC", f): f for f in raw_files}
+    for slug, rawname in SLUG_TO_RAW.items():
+        rn = unicodedata.normalize("NFC", rawname)
+        if rn not in by_norm:
+            print("MISSING RAW:", rawname)
+            continue
+        pct = dechecker(os.path.join(RAW_DIR, by_norm[rn]), os.path.join(OUT_DIR, slug))
+        print(f"  {slug}: removed {pct:.1f}%")

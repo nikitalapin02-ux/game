@@ -6,13 +6,15 @@ const SPACING = 380;          // расстояние между обычным�
 const PORTAL_SPACING = 620;   // расстояние вокруг порталов (простор для ворот)
 const GROUND_Y_FRAC = 0.72;   // относительная высота земли на экране
 const SPRITE_FRAME = 64;      // размер кадра в спрайт-листе 256x256 (4x2)
-const STEP_LEN = 16;          // "шаг" в мировых px на один кадр анимации (плавность по расстоянию)
+const STEP_LEN = 20;          // "шаг" в мировых px на один кадр анимации (плавность по расстоянию)
+const CHAR_H_ROAD = SPRITE_FRAME * 1.15;
+const CHAR_H_PORTAL = SPRITE_FRAME * 1.35;
 
 const SEASONS = {
-  spring: { sky: ["#dff3ff", "#eafff0"], ground: "#8fd17a", groundEdge: "#6fae5c" },
+  spring: { sky: ["#eaf6ff", "#fff4e8"], ground: "#8fd17a", groundEdge: "#6fae5c" },
   summer: { sky: ["#bfe8ff", "#fff6d8"], ground: "#79c15a", groundEdge: "#5a9d3e" },
   autumn: { sky: ["#ffe3c2", "#ffd0a8"], ground: "#c98a4b", groundEdge: "#a56a34" },
-  winter: { sky: ["#e8f1ff", "#ffffff"], ground: "#eef4fb", groundEdge: "#c9dcf0" },
+  winter: { sky: ["#eaf1ff", "#ffffff"], ground: "#eef4fb", groundEdge: "#c9dcf0" },
 };
 function seasonOf(month) {
   if (month >= 3 && month <= 5) return "spring";
@@ -27,6 +29,7 @@ function lerpColor(c1, c2, t) {
   const a = hexToRgb(c1), b = hexToRgb(c2);
   return rgbToCss([lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)]);
 }
+function hash(n) { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); }
 
 // ---- предвычисление позиций точек на дороге ----
 let worldX = 220;
@@ -39,7 +42,7 @@ const WORLD_END = worldX + 260;
 // ---- загрузка изображений ----
 function loadImage(src) {
   const img = new Image();
-  img.src = src;
+  img.src = (typeof window !== "undefined" && window.ASSET_URIS && window.ASSET_URIS[src]) || src;
   return img;
 }
 const CHAR_SPRITES = {
@@ -48,26 +51,112 @@ const CHAR_SPRITES = {
   max: loadImage("assets/characters/max_walk_sheet.png"),
   shemrok: loadImage("assets/characters/shemrok_walk_sheet.png"),
 };
-const LOCATION_PACKS = {};
-(function preloadPacks() {
-  const slugs = new Set();
-  TIMELINE.forEach(p => p.pack && slugs.add(p.pack));
-  Object.values(PORTALS).forEach(p => p.pack && slugs.add(p.pack));
-  slugs.forEach(s => { LOCATION_PACKS[s] = loadImage(`assets/locations/${s}.png`); });
-})();
 
-// генерические зоны нарезки атласа декора 1024x1024 (см. docs/scenario.md пояснение в data.js)
-const DECOR_SLOTS = [
-  { x: 0, y: 0, w: 340, h: 340 },
-  { x: 340, y: 0, w: 340, h: 340 },
-  { x: 680, y: 0, w: 344, h: 340 },
-  { x: 0, y: 340, w: 340, h: 170 },
-  { x: 340, y: 340, w: 340, h: 170 },
-  { x: 0, y: 510, w: 340, h: 220 },
-  { x: 340, y: 510, w: 340, h: 220 },
-  { x: 0, y: 730, w: 340, h: 170 },
-  { x: 340, y: 730, w: 340, h: 170 },
-];
+// ---- декор: отдельные, точно вырезанные объекты (см. tools/slice_decor.py) ----
+const DECOR_IMAGES = {}; // "slug/idx" -> Image
+function decorImage(slug, idx) {
+  const key = slug + "/" + idx;
+  if (!DECOR_IMAGES[key]) DECOR_IMAGES[key] = loadImage(`assets/decor/${slug}/${idx}.png`);
+  return DECOR_IMAGES[key];
+}
+// детерминированный выбор N объектов пака по seed, с категорией (big/med/small по рангу площади)
+function pickDecorEntries(slug, seed, count) {
+  const list = typeof DECOR_MANIFEST !== "undefined" ? DECOR_MANIFEST[slug] : null;
+  if (!list || !list.length) return [];
+  const picks = [];
+  for (let i = 0; i < count; i++) {
+    const r = hash(seed * 13.37 + i * 7.77);
+    const idx = Math.floor(r * list.length) % list.length;
+    const entry = list[idx];
+    const category = idx <= 1 ? "big" : idx <= 4 ? "medium" : "small";
+    picks.push({ entry, idx, category, img: decorImage(slug, list.indexOf(entry)) });
+  }
+  return picks;
+}
+const CATEGORY_HEIGHT = {
+  big: [2.2, 3.0],
+  medium: [1.05, 1.55],
+  small: [0.4, 0.72],
+};
+function drawDecorObject(ctx, pick, x, groundBottomY, refCharH, seed) {
+  const img = pick.img;
+  if (!img.complete || !img.naturalWidth) return;
+  const [lo, hi] = CATEGORY_HEIGHT[pick.category];
+  const hMul = lo + hash(seed + pick.idx * 3.1) * (hi - lo);
+  const drawH = refCharH * hMul;
+  const aspect = (pick.entry.w || img.naturalWidth) / (pick.entry.h || img.naturalHeight);
+  const drawW = drawH * aspect;
+  ctx.drawImage(img, x - drawW / 2, groundBottomY - drawH, drawW, drawH);
+}
+
+// ---- фоны-силуэты по биомам (portal.config.biome), общие для дороги и порталов ----
+function drawBiomeSilhouette(ctx, W, H, biome, baseY, colorTint, camShift) {
+  camShift = camShift || 0;
+  ctx.save();
+  ctx.fillStyle = colorTint;
+  ctx.globalAlpha = 0.45;
+  if (biome === "snow-mountains" || biome === "steppe-mountains" || biome === "castle-hills") {
+    ctx.beginPath();
+    ctx.moveTo(-50 + camShift, baseY);
+    const peaks = 6;
+    for (let i = 0; i <= peaks; i++) {
+      const x = (-50 + camShift) + (i / peaks) * (W + 100);
+      const peakY = baseY - (i % 2 === 0 ? 120 : 70) - hash(i + biome.length) * 40;
+      ctx.lineTo(x, peakY);
+    }
+    ctx.lineTo(W + 50, baseY);
+    ctx.closePath();
+    ctx.fill();
+  } else if (biome === "tropical-beach" || biome === "jungle-lagoon" || biome === "desert-coast") {
+    const grad = ctx.createRadialGradient(W * 0.5, baseY - 40, 10, W * 0.5, baseY - 40, W * 0.5);
+    grad.addColorStop(0, "rgba(255,220,150,0.55)");
+    grad.addColorStop(1, "rgba(255,220,150,0)");
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(W * 0.5, baseY - 20, W * 0.42, 0, Math.PI * 2); ctx.fill();
+  } else if (biome === "canal-city") {
+    ctx.globalAlpha = 0.4;
+    for (let i = -1; i < 9; i++) {
+      const x = (-40 + camShift * 0.6) + i * (W / 7);
+      const bh = 60 + (i % 3) * 34;
+      ctx.fillRect(x, baseY - bh, W / 9, bh);
+    }
+  } else if (biome === "canyon-sea") {
+    ctx.globalAlpha = 0.38;
+    ctx.beginPath();
+    ctx.moveTo(-50, baseY);
+    ctx.lineTo(-50, baseY - 90);
+    for (let i = 0; i < 5; i++) ctx.lineTo(-50 + (i + 1) * (W / 4), baseY - 60 - (i % 2) * 50);
+    ctx.lineTo(W + 50, baseY);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // forest-river / умолчание: мягкая линия леса
+    ctx.globalAlpha = 0.32;
+    ctx.beginPath();
+    ctx.moveTo(-50, baseY);
+    for (let i = 0; i <= 10; i++) {
+      const x = -50 + i * (W + 100) / 10;
+      ctx.lineTo(x, baseY - 40 - hash(i * 3.3) * 30);
+    }
+    ctx.lineTo(W + 50, baseY);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function biomeOfTimelinePoint(pt) {
+  if (pt.portal) return PORTALS[pt.portal].biome;
+  // ищем ближайший портал по индексу в TIMELINE для лёгкого тематического намёка
+  const idx = TIMELINE.indexOf(pt);
+  for (let d = 1; d < 8; d++) {
+    const a = TIMELINE[idx - d], b = TIMELINE[idx + d];
+    if (a && a.portal) return PORTALS[a.portal].biome;
+    if (b && b.portal) return PORTALS[b.portal].biome;
+  }
+  return "forest-river";
+}
 
 class RoadEngine {
   constructor(canvas) {
@@ -78,14 +167,17 @@ class RoadEngine {
     this.time = 0;
     this.player = { worldX: 40, distance: 0, facing: 1, running: false, jumpT: 0 };
     this.followers = [
-      { sprite: "ksyusha", offset: 70, distance: 0, bobPhase: 1.1 },
-      { sprite: "max", offset: 130, distance: 0, bobPhase: 2.4 },
-      { sprite: "shemrok", offset: 175, distance: 0, bobPhase: 3.7 },
+      { sprite: "ksyusha", offset: 78, distance: 0, bobPhase: 1.1 },
+      { sprite: "max", offset: 145, distance: 0, bobPhase: 2.4 },
+      { sprite: "shemrok", offset: 195, distance: 0, bobPhase: 3.7 },
     ];
     this.activePoint = null;
+    this.dust = [];
+    this.sparkles = Array.from({ length: 26 }, (_, i) => ({
+      x: Math.random(), y: Math.random() * 0.6, phase: Math.random() * 10, speed: 0.4 + Math.random() * 0.5,
+    }));
     this.resize();
     window.addEventListener("resize", () => this.resize());
-    this._decorCache = new Map();
   }
 
   resize() {
@@ -101,7 +193,7 @@ class RoadEngine {
     const run = k["ShiftLeft"] || k["ShiftRight"];
     const p = this.player;
     p.running = !!run && (left || right);
-    const speed = (run ? 108 : 58) * dt; // очень медленная база ходьбы, бег заметно быстрее
+    const speed = (run ? 300 : 168) * dt; // бодрая ходьба, быстрый динамичный бег
     let dx = 0;
     if (left) dx -= speed;
     if (right) dx += speed;
@@ -109,22 +201,26 @@ class RoadEngine {
       p.worldX = Math.max(20, Math.min(WORLD_END, p.worldX + dx));
       p.distance += Math.abs(dx);
       p.facing = dx > 0 ? 1 : -1;
+      if (p.running && this.time % 0.05 < dt) {
+        this.dust.push({ x: p.worldX - p.facing * 18, t: this.time, side: Math.random() < 0.5 });
+        if (this.dust.length > 30) this.dust.shift();
+      }
     }
     if (k["Space"] && p.jumpT <= 0) p.jumpT = 1;
-    if (p.jumpT > 0) { p.jumpT -= dt * 2.2; if (p.jumpT < 0) p.jumpT = 0; }
+    if (p.jumpT > 0) { p.jumpT -= dt * 2.6; if (p.jumpT < 0) p.jumpT = 0; }
 
     // ведомые персонажи плавно следуют по дистанции (лаг = offset)
     this.followers.forEach(f => {
-      const targetX = p.worldX - f.offset;
-      f.worldX = f.worldX === undefined ? targetX : lerp(f.worldX, targetX, Math.min(1, dt * 4));
+      const targetX = p.worldX - f.offset * p.facing;
+      f.worldX = f.worldX === undefined ? targetX : lerp(f.worldX, targetX, Math.min(1, dt * 6));
       f.distance += Math.abs(targetX - (f._prevX ?? targetX));
       f._prevX = targetX;
       f.facing = p.facing;
     });
 
-    // камера
+    // камера — быстрая, отзывчивая
     const targetCam = p.worldX - this.canvas.width * 0.36;
-    this.camX = lerp(this.camX, Math.max(0, targetCam), Math.min(1, dt * 5));
+    this.camX = lerp(this.camX, Math.max(0, targetCam), Math.min(1, dt * 8));
 
     // ближайшая точка для подсказки "E"
     let nearest = null, nearestD = 9999;
@@ -136,7 +232,6 @@ class RoadEngine {
   }
 
   seasonColorsAt(wx) {
-    // находим соседние точки для плавной интерполяции сезона
     let prev = TIMELINE[0], next = TIMELINE[TIMELINE.length - 1];
     for (let i = 0; i < TIMELINE.length - 1; i++) {
       if (TIMELINE[i].worldX <= wx && TIMELINE[i + 1].worldX >= wx) {
@@ -171,22 +266,13 @@ class RoadEngine {
   }
 
   drawDecorForPoint(pt, groundY) {
-    const pack = pt.pack && LOCATION_PACKS[pt.pack];
-    if (!pack || !pack.complete || !pack.naturalWidth) return;
-    const ctx = this.ctx;
-    // детерминированный псевдослучайный выбор 3 слотов декора по id точки
-    const seed = pt.id * 2654435761 % 2147483647;
-    const rand = (n) => ((seed * (n + 7)) % 97) / 97;
-    const slotsPicked = [0, 5, 3].map((base, i) => DECOR_SLOTS[(base + pt.id + i) % DECOR_SLOTS.length]);
-    slotsPicked.forEach((slot, i) => {
-      const dx = (rand(i) - 0.5) * 260;
-      const screenX = pt.worldX - this.camX + dx - (i === 1 ? 90 : 0);
-      const scale = 0.32 + rand(i + 3) * 0.12;
-      const w = slot.w * scale, h = slot.h * scale;
-      ctx.save();
-      ctx.globalAlpha = 0.92;
-      ctx.drawImage(pack, slot.x, slot.y, slot.w, slot.h, screenX - w / 2, groundY - h + 6, w, h);
-      ctx.restore();
+    if (!pt.pack) return;
+    const seed = pt.id * 91.7;
+    const picks = pickDecorEntries(pt.pack, seed, 4);
+    picks.forEach((pick, i) => {
+      const spread = [-190, -70, 90, 210][i] || (i - 1.5) * 130;
+      const x = pt.worldX - this.camX + spread + (hash(seed + i) - 0.5) * 40;
+      drawDecorObject(this.ctx, pick, x, groundY + 8, CHAR_H_ROAD, seed + i);
     });
   }
 
@@ -194,6 +280,9 @@ class RoadEngine {
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
     const groundY = H * GROUND_Y_FRAC;
     const seasonC = this.seasonColorsAt(this.player.worldX);
+    const nearPt = this.activePoint || TIMELINE.reduce((a, b) =>
+      Math.abs(b.worldX - this.player.worldX) < Math.abs(a.worldX - this.player.worldX) ? b : a, TIMELINE[0]);
+    const biome = biomeOfTimelinePoint(nearPt);
 
     // небо
     const skyGrad = ctx.createLinearGradient(0, 0, 0, groundY);
@@ -202,7 +291,21 @@ class RoadEngine {
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, groundY);
 
-    // мягкие "холмы" параллакс
+    // силуэт биома ближайшей главы/портала
+    drawBiomeSilhouette(ctx, W, groundY - 4, biome, groundY - 4, seasonC.groundEdge, -this.camX * 0.15);
+
+    // мягкие искры/светлячки для уютного, "радующего" ощущения
+    ctx.save();
+    this.sparkles.forEach(s => {
+      const alpha = 0.25 + 0.25 * Math.sin(this.time * s.speed + s.phase);
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.fillStyle = "#fff6d8";
+      const sx = ((s.x * W - this.camX * 0.05) % W + W) % W;
+      ctx.beginPath(); ctx.arc(sx, s.y * groundY, 2, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+
+    // параллакс-холмы
     ctx.save();
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = seasonC.ground;
@@ -233,7 +336,7 @@ class RoadEngine {
     // декор + точки маршрута
     TIMELINE.forEach(pt => {
       const screenX = pt.worldX - this.camX;
-      if (screenX < -200 || screenX > W + 200) return;
+      if (screenX < -260 || screenX > W + 260) return;
       this.drawDecorForPoint(pt, groundY);
       this.drawMarker(pt, screenX, groundY);
     });
@@ -241,15 +344,37 @@ class RoadEngine {
     // финальные ворота в конце дороги
     this.drawFinaleGate(WORLD_END - this.camX, groundY);
 
+    // пыль от бега
+    ctx.save();
+    this.dust.forEach(d => {
+      const age = this.time - d.t;
+      ctx.globalAlpha = Math.max(0, 0.4 - age * 0.6);
+      ctx.fillStyle = "#fff";
+      const dx = d.worldX ?? d.x;
+      ctx.beginPath();
+      ctx.ellipse(dx - this.camX, groundY + 26 + (d.side ? 3 : -3), 5 + age * 14, 3 + age * 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
+
     // персонажи (ведомые сзади, игрок сверху)
     const order = [...this.followers].sort((a, b) => a.worldX - b.worldX);
     order.forEach(f => {
       const frameIdx = Math.floor(f.distance / STEP_LEN);
-      const scale = f.sprite === "shemrok" ? 0.5 : f.sprite === "max" ? 0.62 : 1.05;
+      const scale = f.sprite === "shemrok" ? 0.55 : f.sprite === "max" ? 0.68 : 1.15;
       this.drawSprite(CHAR_SPRITES[f.sprite], frameIdx, f.worldX, groundY, f.facing, scale, f.bobPhase);
     });
     const pFrame = Math.floor(this.player.distance / STEP_LEN);
-    this.drawSprite(CHAR_SPRITES.nikita, pFrame, this.player.worldX, groundY - this.player.jumpT * 26, this.player.facing, 1.1, 0);
+    const runTilt = this.player.running ? this.player.facing * 3 : 0;
+    ctx.save();
+    if (runTilt) {
+      const sx = this.player.worldX - this.camX;
+      ctx.translate(sx, groundY);
+      ctx.rotate(runTilt * Math.PI / 180);
+      ctx.translate(-sx, -groundY);
+    }
+    this.drawSprite(CHAR_SPRITES.nikita, pFrame, this.player.worldX, groundY - this.player.jumpT * 26, this.player.facing, 1.2, 0);
+    ctx.restore();
   }
 
   drawMarker(pt, screenX, groundY) {

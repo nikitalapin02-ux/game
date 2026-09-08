@@ -1,9 +1,10 @@
 /* ==========================================================================
    Наш Путь — движок портала (top-down комната)
-   Общий шаблон, переиспользуемый для всех 13 локаций.
+   Общий шаблон, переиспользуемый для всех 13 локаций, оформленный
+   декором конкретной локации (см. tools/slice_decor.py / decor_manifest.js).
    ========================================================================== */
 
-const PORTAL_STEP_LEN = 10;
+const PORTAL_STEP_LEN = 13;
 
 class PortalEngine {
   constructor(canvas) {
@@ -33,6 +34,14 @@ class PortalEngine {
     this.shakeT = 1;
     this.visited = this.visited || {};
     this.visited[portalKey] = this.visited[portalKey] || new Set();
+    // фиксированная, но детерминированная расстановка декора для этой локации
+    this.decorLayout = (this.config.pack ? pickDecorEntries(this.config.pack, portalKey.length * 17.3, 11) : [])
+      .map((pick, i) => ({
+        pick,
+        // равномерно по кольцу вокруг зоны ходьбы, чтобы не перекрывать центр
+        angle: (i / 11) * Math.PI * 2 + hash(i * 3.1) * 0.4,
+        radiusMul: 0.62 + hash(i * 5.7) * 0.5,
+      }));
   }
 
   update(dt) {
@@ -43,7 +52,7 @@ class PortalEngine {
     const right = k["ArrowRight"] || k["KeyD"];
     const up = k["ArrowUp"] || k["KeyW"];
     const down = k["ArrowDown"] || k["KeyS"];
-    const speed = 0.09 * dt; // отдельная, ещё более медленная скорость в портале
+    const speed = 0.22 * dt; // бодрая скорость в портале
     let dx = 0, dy = 0;
     if (left) { dx -= speed; this.player.facing = "left"; }
     if (right) { dx += speed; this.player.facing = "right"; }
@@ -56,20 +65,18 @@ class PortalEngine {
     const norm = ((nx - cx) / rx) ** 2 + ((ny - cy) / ry) ** 2;
     if (norm <= 1) { this.player.x = nx; this.player.y = ny; }
     else {
-      // скольжение вдоль границы эллипса вместо жёсткой остановки
       if (((nx - cx) / rx) ** 2 + ((this.player.y - cy) / ry) ** 2 <= 1) this.player.x = nx;
       if (((this.player.x - cx) / rx) ** 2 + ((ny - cy) / ry) ** 2 <= 1) this.player.y = ny;
     }
 
     if (this.player.moving) {
       this.player.distance += Math.hypot(dx, dy) * this.canvas.width;
-      if (this.time % 0.18 < dt) {
+      if (this.time % 0.14 < dt) {
         this.footprints.push({ x: this.player.x, y: this.player.y, t: this.time, side: this.footprints.length % 2 });
         if (this.footprints.length > 40) this.footprints.shift();
       }
     }
 
-    // ближайшая интерактивная точка
     let nearest = null, nearestD = 9999;
     (this.config.points || []).forEach(pt => {
       const d = Math.hypot(pt.x / 100 - this.player.x, pt.y / 100 - this.player.y);
@@ -78,36 +85,29 @@ class PortalEngine {
     this.activePointId = nearestD < 0.07 ? nearest.id : null;
   }
 
-  drawProceduralBackdrop() {
+  drawBackdrop() {
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
     const [c1, c2, c3] = this.config.colors;
-    const grad = ctx.createRadialGradient(W / 2, H * 0.42, 40, W / 2, H * 0.5, W * 0.75);
+    const grad = ctx.createRadialGradient(W / 2, H * 0.4, 40, W / 2, H * 0.5, W * 0.8);
     grad.addColorStop(0, c1);
     grad.addColorStop(0.55, c2);
     grad.addColorStop(1, c3);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // лёгкий параллакс-декор из ассет-пака локации, если есть
-    const pack = this.config.pack && LOCATION_PACKS[this.config.pack];
-    if (pack && pack.complete && pack.naturalWidth) {
-      const camShiftX = (this.player.x - 0.5) * -30;
-      const camShiftY = (this.player.y - 0.5) * -16;
-      const positions = [
-        { slot: DECOR_SLOTS[0], x: 0.12, y: 0.22, s: 0.34 },
-        { slot: DECOR_SLOTS[2], x: 0.86, y: 0.2, s: 0.3 },
-        { slot: DECOR_SLOTS[5], x: 0.08, y: 0.72, s: 0.3 },
-        { slot: DECOR_SLOTS[6], x: 0.92, y: 0.75, s: 0.28 },
-      ];
-      positions.forEach(p => {
-        const w = p.slot.w * p.s, h = p.slot.h * p.s;
-        ctx.save();
-        ctx.globalAlpha = 0.85;
-        ctx.drawImage(pack, p.slot.x, p.slot.y, p.slot.w, p.slot.h,
-          p.x * W - w / 2 + camShiftX, p.y * H - h + camShiftY, w, h);
-        ctx.restore();
-      });
+    drawBiomeSilhouette(ctx, W, H, this.config.biome, H * 0.46, c3, (this.player.x - 0.5) * -60);
+
+    // тёплые парящие искры — тот самый "приятный" акцент
+    ctx.save();
+    for (let i = 0; i < 16; i++) {
+      const t = this.time * 0.5 + i * 1.7;
+      const sx = ((i * 97) % W + Math.sin(t) * 30 + W) % W;
+      const sy = (H * 0.15 + (i * 53) % (H * 0.6) + Math.sin(t * 1.3) * 14);
+      ctx.globalAlpha = 0.18 + 0.12 * Math.sin(t * 2);
+      ctx.fillStyle = "#fff8e6";
+      ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, Math.PI * 2); ctx.fill();
     }
+    ctx.restore();
 
     // зона ходьбы (эллипс — "протоптанная дорожка")
     ctx.save();
@@ -116,6 +116,13 @@ class PortalEngine {
     ctx.ellipse(W * 0.5, H * 0.58, W * 0.34, H * 0.3, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
+    // декор локации по кольцу вокруг зоны ходьбы — придаёт стиль конкретного места
+    (this.decorLayout || []).forEach((d, i) => {
+      const cx = W * 0.5 + Math.cos(d.angle) * W * 0.46 * d.radiusMul;
+      const cy = H * 0.56 + Math.sin(d.angle) * H * 0.42 * d.radiusMul;
+      drawDecorObject(ctx, d.pick, cx, cy + 30, CHAR_H_PORTAL, i * 11.1);
+    });
   }
 
   render() {
@@ -125,7 +132,7 @@ class PortalEngine {
       const s = this.shakeT * 10;
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
-    this.drawProceduralBackdrop();
+    this.drawBackdrop();
 
     // следы
     ctx.save();
@@ -159,10 +166,10 @@ class PortalEngine {
     if (img.complete && img.naturalWidth) {
       const frame = Math.floor(this.player.distance / PORTAL_STEP_LEN) % 8;
       const col = frame % 4, row = Math.floor(frame / 4);
-      const scale = 1.3;
+      const scale = 1.5;
       const w = SPRITE_FRAME * scale, h = SPRITE_FRAME * scale;
       const px = this.player.x * W, py = this.player.y * H;
-      const bob = this.player.moving ? Math.sin(this.time * 8) * 2 : 0;
+      const bob = this.player.moving ? Math.sin(this.time * 9) * 2.4 : 0;
       ctx.save();
       ctx.translate(px, py + bob);
       const dustAlpha = this.player.moving ? 0.35 : 0;
