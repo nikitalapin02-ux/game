@@ -2,11 +2,12 @@
    Наш Путь — движок дороги (side-scroller)
    ========================================================================== */
 
-const SPACING = 380;          // расстояние между обычными точками
-const PORTAL_SPACING = 620;   // расстояние вокруг порталов (простор для ворот)
+const SPACING = 210;          // расстояние между обычными точками (короче — динамичнее)
+const PORTAL_SPACING = 340;   // расстояние вокруг порталов
 const GROUND_Y_FRAC = 0.86;   // относительная высота "линии ходьбы" на экране
 const STEP_LEN = 20;          // "шаг" в мировых px на один кадр анимации (плавность по расстоянию)
-const CHAR_TARGET_H = 92;     // целевой рост персонажа на дороге в px экрана (нормализует разные спрайт-листы)
+const CHAR_TARGET_H = 148;    // целевой рост персонажа на дороге в px экрана (нормализует разные спрайт-листы)
+const BG_ZOOM = 1.22;          // лёгкое увеличение фоновой сцены — крупнее, "ближе" к камере
 
 // запасные цвета неба на случай, если картинка сцены ещё не загружена
 const SEASON_FALLBACK = {
@@ -68,6 +69,8 @@ const SCENE_IMAGES = {
 };
 const PORTAL_SCENES = {};
 Object.keys(PORTALS).forEach(key => { PORTAL_SCENES[key] = loadImage(`assets/scenes/${key}.png`); });
+const PORTAL_GATE_ICONS = {};
+Object.keys(PORTALS).forEach(key => { PORTAL_GATE_ICONS[key] = loadImage(`assets/gates/${key}.png`); });
 const FINALE_SCENE = loadImage("assets/scenes/finale.png");
 
 function readyImg(img) { return img && img.complete && img.naturalWidth > 0; }
@@ -78,15 +81,17 @@ function readyImg(img) { return img && img.complete && img.naturalWidth > 0; }
 // жёсткого/зеркального шва
 function drawTiledScene(ctx, img, W, H, parallaxX, alpha) {
   if (!readyImg(img)) return;
-  const scale = H / img.naturalHeight;
+  const drawH = H * BG_ZOOM;
+  const scale = drawH / img.naturalHeight;
   const tileW = img.naturalWidth * scale;
+  const yOff = H - drawH; // подрезаем сверху, "низ" сцены (тропа) остаётся на месте
   const blend = Math.min(tileW * 0.35, 260);
   const start = -((parallaxX % tileW) + tileW) % tileW;
   let x = start - tileW;
   while (x < W + tileW) {
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.drawImage(img, x, 0, tileW, H);
+    ctx.drawImage(img, x, yOff, tileW, drawH);
     ctx.restore();
     x += tileW;
   }
@@ -114,9 +119,9 @@ class RoadEngine {
     this.time = 0;
     this.player = { worldX: 40, distance: 0, facing: 1, running: false, jumpT: 0 };
     this.followers = [
-      { sprite: "ksyusha", offset: 78, distance: 0, bobPhase: 1.1 },
-      { sprite: "max", offset: 145, distance: 0, bobPhase: 2.4 },
-      { sprite: "shemrok", offset: 195, distance: 0, bobPhase: 3.7 },
+      { sprite: "ksyusha", offset: 42, distance: 0, bobPhase: 1.1 },
+      { sprite: "max", offset: 78, distance: 0, bobPhase: 2.4 },
+      { sprite: "shemrok", offset: 104, distance: 0, bobPhase: 3.7 },
     ];
     this.activePoint = null;
     this.dust = [];
@@ -280,24 +285,35 @@ class RoadEngine {
     ctx.translate(screenX, groundY);
     if (isPortal) {
       const glow = 0.5 + Math.sin(this.time * 2 + pt.id) * 0.15;
-      const grad = ctx.createRadialGradient(0, -70, 4, 0, -70, 90);
-      grad.addColorStop(0, `rgba(255,200,140,${0.55 * glow})`);
-      grad.addColorStop(1, "rgba(255,200,140,0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(0, -70, 90, 0, Math.PI * 2); ctx.fill();
-
-      ctx.strokeStyle = "#ffd8ad";
-      ctx.lineWidth = 5;
-      ctx.beginPath(); ctx.ellipse(0, -70, 34, 62, 0, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
-      ctx.beginPath(); ctx.ellipse(0, -70, 34, 62, 0, 0, Math.PI * 2); ctx.fill();
-
+      const bob = Math.sin(this.time * 1.4 + pt.id) * 4;
+      const icon = PORTAL_GATE_ICONS[pt.portal];
+      if (readyImg(icon)) {
+        const gh = CHAR_TARGET_H * 1.9;
+        const gw = gh * (icon.naturalWidth / icon.naturalHeight);
+        const grad = ctx.createRadialGradient(0, -gh * 0.5, 4, 0, -gh * 0.5, gh * 0.75);
+        grad.addColorStop(0, `rgba(255,210,150,${0.4 * glow})`);
+        grad.addColorStop(1, "rgba(255,210,150,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(0, -gh * 0.5, gh * 0.75, 0, Math.PI * 2); ctx.fill();
+        ctx.drawImage(icon, -gw / 2, -gh + bob, gw, gh);
+      } else {
+        const grad = ctx.createRadialGradient(0, -70, 4, 0, -70, 90);
+        grad.addColorStop(0, `rgba(255,200,140,${0.55 * glow})`);
+        grad.addColorStop(1, "rgba(255,200,140,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(0, -70, 90, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#ffd8ad";
+        ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.ellipse(0, -70, 34, 62, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.beginPath(); ctx.ellipse(0, -70, 34, 62, 0, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.fillStyle = "#fff6ea";
       ctx.font = "700 13px Segoe UI, sans-serif";
       ctx.textAlign = "center";
-      ctx.shadowColor = "rgba(0,0,0,0.6)";
-      ctx.shadowBlur = 4;
-      ctx.fillText(pt.title.split(",")[0], 0, -150);
+      ctx.shadowColor = "rgba(0,0,0,0.7)";
+      ctx.shadowBlur = 5;
+      ctx.fillText(pt.title.split(",")[0], 0, -CHAR_TARGET_H * 2.1);
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.shadowColor = "rgba(0,0,0,0.5)";
