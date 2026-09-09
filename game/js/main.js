@@ -66,6 +66,8 @@ function handleInteract() {
       }
       return;
     }
+    const burstX = pt.worldX - road.camX, burstY = canvas.height * GROUND_Y_FRAC - 80;
+    spawnSparkleBurst(burstX, burstY, pt.portal ? "#ffb37a" : "#7ad1c9");
     if (pt.portal) {
       enterPortal(pt.portal);
     } else if (lastVisitedPointId !== pt.id) {
@@ -80,7 +82,9 @@ function handleInteract() {
     const id = portal.activePointId;
     if (!id) return;
     const pt = portal.config.points.find(p => p.id === id);
+    const firstVisit = !portal.visited[portal.key].has(id);
     portal.visited[portal.key].add(id);
+    spawnSparkleBurst(pt.x / 100 * canvas.width, pt.y / 100 * canvas.height, firstVisit ? "#ffd27a" : "#7ad1c9");
     openComic(`${portal.config.title} · ${pt.label}`, pt.comic, () => {
       if (pt.easterEgg && pt.easterEgg.startsWith("achievement:")) {
         unlockAchievement(pt.easterEgg.slice("achievement:".length));

@@ -315,13 +315,14 @@ class RoadEngine {
       ctx.shadowBlur = 5;
       ctx.fillText(pt.title.split(",")[0], 0, -CHAR_TARGET_H * 2.1);
     } else {
+      const bob = Math.sin(this.time * 2.2 + pt.id) * 3;
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.shadowColor = "rgba(0,0,0,0.5)";
       ctx.shadowBlur = 4;
-      ctx.beginPath(); ctx.arc(0, -16, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, -16 + bob, 5, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.45)";
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(0, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -16 + bob); ctx.lineTo(0, 0); ctx.stroke();
     }
     ctx.restore();
   }

@@ -12,6 +12,25 @@ const CHAPTER_NAMES = {
   7: "Глава 7 · Дорога домой",
 };
 
+// небольшой всплеск искр в экранных координатах — визуальный отклик на E
+function spawnSparkleBurst(x, y, color) {
+  color = color || "#ffd27a";
+  for (let i = 0; i < 10; i++) {
+    const el = document.createElement("div");
+    const angle = (i / 10) * Math.PI * 2 + Math.random() * 0.5;
+    const dist = 30 + Math.random() * 30;
+    el.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:6px;height:6px;border-radius:50%;
+      background:${color};pointer-events:none;z-index:60;box-shadow:0 0 6px ${color};
+      transform:translate(-50%,-50%);transition:transform .55s cubic-bezier(.2,.8,.3,1), opacity .55s ease;`;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.transform = `translate(${Math.cos(angle) * dist - 3}px, ${Math.sin(angle) * dist - 3}px) scale(.2)`;
+      el.style.opacity = "0";
+    });
+    setTimeout(() => el.remove(), 600);
+  }
+}
+
 function showToast(text) {
   const el = document.createElement("div");
   el.className = "toast";
